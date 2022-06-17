@@ -1,4 +1,4 @@
-# Auto_UPnet
+# Auto_UPnet Ver.2
 New mail check every x time.
 
 Programme requirements:
@@ -26,6 +26,6 @@ CAUTION!!! After =, you must type 1 space, as in the example!!!
 
 6) install the latest Chrome version 
 
-Finally, be aware that the first time you run the application, you may receive an incorrect PushBullet notification.
+  Finally, be aware that the first time you run the application, you may receive an incorrect PushBullet notification.
 For the application to work properly, it has to be constantly running. (When you run the program, just minimize the window)
 Also, any errors that may occur will be recorded in the file: login_errors.txt
