@@ -1,4 +1,4 @@
-# Auto_UPnet Ver.2
+# Auto_UPnet Ver.6
 New mail check every x time.
 
 Programme requirements:
