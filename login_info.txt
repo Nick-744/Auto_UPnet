@@ -1,3 +1,0 @@
-username= upxxxxxxx
-password= *********
-api_key= xxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
