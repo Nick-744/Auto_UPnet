@@ -1,104 +1,159 @@
-from selenium import webdriver
-from selenium.webdriver.chrome.options import Options
-from selenium.webdriver.chrome.service import Service
-from selenium.webdriver.common.by import By
-from webdriver_manager.chrome import ChromeDriverManager
+from requests import Session
 from time import sleep
-from pushbullet import PushBullet
+from plyer import notification
+from cryptography.fernet import Fernet
 from datetime import datetime
+from os.path import exists
+
+def error_handle(errors_number):
+
+    dateTimeNow = str(datetime.now())[:19]
+    login_errors_file = "login_errors.txt"
+
+    if exists(login_errors_file) == False:
+        with open(login_errors_file, "w") as f:
+            f.write('Auto_UPnet Errors that have occurred:\n\n')
+
+    with open(login_errors_file, "a") as f:
+        if   errors_number == 1: f.write("The URL didn't load.    | {}\n".format(dateTimeNow)) #getHTML() Err
+        elif errors_number == 3: f.write("Couldn't execute check. | {}\n".format(dateTimeNow)) #main() [Loop] Err
+
+    return;
+
+def loginInfo():
+
+    login_info = "login_info.txt"
+    
+    if exists(login_info) == False:
+        success = False
+        
+        for tries in range(3):
+            username = str(input("Πληκτρολόγησε το username σου: "))
+            password = str(input("Πληκτρολόγησε το password σου: "))
+            
+            test_login = getHTML(username, password)
+            if test_login.count('Η συνεδρία σας είναι άκυρη ή έχει λήξει.') == 0:
+                print("\nΕπιτυχής σύνδεση!\n")
+                success = True
+
+                key = Fernet.generate_key()
+                with open("the.key", "wb") as f:
+                    f.write(key)
+
+                info = "{}\n{}".format(username, password)
+                info = bytes(info, encoding = 'utf8')
+                info_encrypted = Fernet(key).encrypt(info)
+                with open(login_info, "wb") as f:
+                    f.write(info_encrypted)
+                
+                break
+            
+            print("\nΑποτυχία σύνδεσης!\nΣας απομένουν {} προσπάθειες.\n".format(str(2 - tries)))
+            
+        if success == False:
+            print("- Τερματισμός Προγράμματος -")
+            sleep(3)
+
+            exit(1)
+
+    with open("the.key", "rb") as f:
+        key = f.read()
+
+    with open(login_info, "rb") as f:
+        info_encrypted = f.read()
+    info_decrypted = Fernet(key).decrypt(info_encrypted)
+    info_decrypted = info_decrypted.decode()
+                           
+    info = info_decrypted.split("\n")
+    username = info[0]
+    password = info[1]
+
+    return (username, password);
+
+def getHTML(username, password):
+
+    url = "https://mail1.upnet.gr/?_task=login"
+
+    with Session() as session:
+        try:
+            response = session.get(url) #Request(find) token
+
+            data = {
+                '_token': response.text[2319 : 2351],
+                '_task': 'login',
+                '_action': 'login',
+                '_timezone': 'Europe/Athens',
+                '_url': '_task=mail&_mbox=INBOX',
+                '_user': username,
+                '_pass': password
+            }
+
+            session.post(url, data = data)
+            response = session.get("https://mail1.upnet.gr/?_task=mail&_action=list&_refresh=1&_layout=widescreen&_mbox=INBOX&_remote=1&_unlock=loading")
+            
+        except:
+            error_handle(1)
+
+            return "";
+
+    return response.text;
+
+def findAndReportNewMessages(html):
+
+    report = ""
+    all_messages = html.split('add_message_row')
+    all_messages.pop(0)
+    new_messages_number = 0
+            
+    for message in all_messages:
+        if message.count('"seen\\":1') == 1: continue; #Έχει αναγνωστεί ήδη αυτό το e-mail από τον χρήστη.
+
+        new_messages_number += 1
+                
+        mail_address_indexStart = message.index('"adr') + 25
+        mail_address_indexEnd = message.index('\\\\\\', mail_address_indexStart)
+        mail_address = message[mail_address_indexStart : mail_address_indexEnd]
+
+        contact_address_indexStart = message.index('"rcmContactAddress') + 23
+        contact_address_indexEnd = message.index('</span>', contact_address_indexStart)
+        contact_address = message[contact_address_indexStart : contact_address_indexEnd]
+
+        date_indexStart = message.index('"date') + 10
+        date_indexEnd = message.index('\\"}', date_indexStart)
+        date = message[date_indexStart : date_indexEnd]
+
+        title_indexStart = message.index('"subject') + 13
+        title_indexEnd = message.index('\\"', title_indexStart)
+        title = message[title_indexStart : title_indexEnd]
+                
+        report += "Τίτλος μυνήματος: "+title+"\nΑποστολέας: "+contact_address+" ["+mail_address+"]\nΗμερομηνία: "+date+"\n"
+
+    return (report, new_messages_number);
+
+def sendNotification(new_messages_number, report):
+
+    notification.notify(title = "UPnet Webmail", message = "{}Ημερομηνία συγχρονισμού: {}".format(report, str(datetime.now())[:19]))
+
+    return report;
 
 def main():
 
-    output_memory = ""
-
-    f = open("login_info.txt", "r")
-    info = f.read()
-    f.close()
-    
-    info = info.split("\n")
-    username = info[0][10:]
-    password = info[1][10:]
-    api_key = info[2][9:]
-
-    submit_button = "[type=button]:not(:disabled), [type=reset]:not(:disabled), [type=submit]:not(:disabled), button:not(:disabled)"
-    url = "https://mail1.upnet.gr/?_task=login"
-
-    service = Service(ChromeDriverManager().install())
-
-    options = Options()
-    options.add_argument("--headless") #Don't show browser
+    username, password = loginInfo()
+    report_memory = ""
 
     while True:
-
         try:
-            driver = webdriver.Chrome(options = options, service = service)
+            html = getHTML(username, password)
 
-            try: driver.get(url)
-            except:
-                f = open("login_errors.txt", "a", encoding = 'utf-8')
-                f.write("The URL didn't load. | {}\n".format(str(datetime.now())[:19]))
-                f.close()
+            report, new_messages_number = findAndReportNewMessages(html)
 
-            driver.find_element(By.NAME, "_user").send_keys(username)
-            driver.find_element(By.NAME, "_pass").send_keys(password)
-            driver.find_element(By.CSS_SELECTOR, submit_button).click()
+            if report != report_memory and report != "": report_memory = sendNotification(new_messages_number, report)
 
-            html = driver.page_source
-                    
-            driver.close()
-
-            all_messages_indexStart = html.index('<tbody><tr')
-            all_messages_indexEnd = html.index('</div>', all_messages_indexStart)
-            all_messages = html[all_messages_indexStart : all_messages_indexEnd]
-
-            messages = all_messages.split('class="message unread')
-            messages.pop(0)
-
-            new_messages_number = all_messages.count('class="msgicon status unread" title="Μη αναγνωσμένο "')
-
-            output = ""
-            
-            for information in range(len(messages)):
-                
-                if messages[information].count('Μη αναγνωσμένο') == 0: break
-                
-                mail_address_indexStart = messages[information].index('class="adr"><span title="') + 25
-                mail_address_indexEnd = messages[information].index('" class', mail_address_indexStart)
-                mail_address = messages[information][mail_address_indexStart : mail_address_indexEnd]
-
-                contact_address_indexStart = messages[information].index('Address') + 9
-                contact_address_indexEnd = messages[information].index('</span>', contact_address_indexStart)
-                contact_address = messages[information][contact_address_indexStart : contact_address_indexEnd]
-
-                date_indexStart = messages[information].index('class="date skip-on-drag">') + 26
-                date_indexEnd = messages[information].index('</span>', date_indexStart)
-                date = messages[information][date_indexStart : date_indexEnd]
-
-                title_indexStart = messages[information].index('long_subject_title') + 48
-                title_indexEnd = messages[information].index('</span>', title_indexStart)
-                title = messages[information][title_indexStart : title_indexEnd]
-                
-                output += "Τίτλος μυνήματος: "+title+"\nΑποστολέας: "+contact_address+" ["+mail_address+"]\nΗμερομηνία: "+date+"\n\n"
-
-            if output != output_memory:
-
-                output_memory = output
-                
-                try:
-                    pb = PushBullet(api_key)
-                    if new_messages_number > 1: push = pb.push_note("UPnet Webmail", "Έχετε {} νέα μυνήματα!\n\n{}Ημερομηνία συγχρονισμού: {}".format(new_messages_number, output, str(datetime.now())[:19]))
-                    elif new_messages_number == 1: push = pb.push_note("UPnet Webmail", "Έχετε 1 νέο μύνημα!\n\n{}Ημερομηνία συγχρονισμού: {}".format(output, str(datetime.now())[:19]))
-
-                except:
-                    f = open("login_errors.txt", "a", encoding = 'utf-8')
-                    f.write("Con err. Wrong API_key. | {}\n\n".format(str(datetime.now())[:19]))
-                    f.close()
-
-        except:
-            f = open("login_errors.txt", "a", encoding = 'utf-8')
-            f.write("Couldn't execute program. | {}\n\n".format(str(datetime.now())[:19]))
-            f.close()
+        except: error_handle(3)
 
         sleep(180) #Δt waiting for new mail check!
 
-main()
+    return;
+
+if __name__ == "__main__":
+    main()
